@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#07131c" />
+  <title>Thumb Slice Rush</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main id="game" aria-label="Thumb Slice Rush arcade game">
+    <canvas id="stage" aria-label="Game area"></canvas>
+    <header class="hud">
+      <div class="score-card"><span>SCORE</span><strong id="score">0</strong></div>
+      <div class="brand">THUMB<span>SLICE</span></div>
+      <div class="score-card best-card"><span>BEST</span><strong id="best">0</strong></div>
+    </header>
+    <div class="tip" id="tip">TAP OR SWIPE TO THROW A KNIFE</div>
+    <div class="toast" id="toast" aria-live="polite"></div>
+    <button class="sound-button" id="soundButton" aria-label="Toggle sound" title="Toggle sound">♪</button>
+    <div class="overlay" id="overlay">
+      <div class="intro-card">
+        <div class="eyebrow">A tiny hole. A huge fruit rush.</div>
+        <h1>THUMB<br><span>SLICE RUSH</span></h1>
+        <p>Fruit bursts from the portal. Aim with your thumb and tap or swipe to launch a knife.</p>
+        <button id="playButton">LET’S SLICE <span>↗</span></button>
+        <small>Unlimited knives · 10 points per fruit</small>
+      </div>
+    </div>
+  </main>
+  <script src="script.js"></script>
+</body>
+</html>
