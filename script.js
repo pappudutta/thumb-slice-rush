@@ -20,7 +20,7 @@
   const state = {
     w: innerWidth, h: innerHeight, dpr: 1, cx: innerWidth / 2, cy: innerHeight * .56,
     score: 0, best: Number(localStorage.getItem('thumb-slice-best') || 0),
-    fruits: [], knives: [], particles: [], sparks: [], running: false,
+    fruits: [], knives: [], lodged: [], particles: [], sparks: [], running: false,
     last: 0, elapsed: 0, spawnIn: .4, pointer: null, sound: false, audio: null,
     portalPulse: 0, shake: 0
   };
@@ -59,12 +59,11 @@
     const angle = rand(-Math.PI, Math.PI);
     const speed = rand(150, 255);
     const radius = rand(17, 24);
-    const fruit = {
+    state.fruits.push({
       x: state.cx, y: state.cy, vx: Math.cos(angle)*speed, vy: Math.sin(angle)*speed,
       radius, rotation: rand(0, TAU), spin: rand(-3.3,3.3), color: pick(colors),
       age: 0, scale: .2, sliced: false, wobble: rand(0, TAU)
-    };
-    state.fruits.push(fruit);
+    });
     state.portalPulse = 1;
     state.sparks.push({x:state.cx,y:state.cy,life:.35,max:.35,color:'#d8ff69'});
     sound(180,.12,'triangle',.022);
@@ -74,10 +73,9 @@
     if (!state.running) return;
     const dx = x - state.cx, dy = y - state.cy;
     const length = Math.hypot(dx,dy);
-    let angle = length > 16 ? Math.atan2(dy,dx) : -Math.PI/2;
-    // Launch from the center portal in the direction of the thumb.
-    state.knives.push({x:state.cx,y:state.cy,angle,vx:Math.cos(angle)*850,vy:Math.sin(angle)*850,
-      rotation:angle,life:1.1,trail:[],hit:false});
+    const angle = length > 16 ? Math.atan2(dy,dx) : -Math.PI/2;
+    state.knives.push({x:state.cx,y:state.cy,px:state.cx,py:state.cy,angle,vx:Math.cos(angle)*850,vy:Math.sin(angle)*850,
+      life:1.1,trail:[],hit:false});
     state.portalPulse = Math.max(state.portalPulse,.55);
     sound(620,.045,'triangle',.018);
     if (!state.pointer?.usedTip) { tip.classList.add('fade'); if(state.pointer) state.pointer.usedTip = true; }
@@ -100,9 +98,19 @@
     showPoints(fruit.x, fruit.y-28);
   }
 
-  function hitTest(knife, fruit) {
-    const dx=fruit.x-knife.x,dy=fruit.y-knife.y;
-    return dx*dx+dy*dy < (fruit.radius+9)**2;
+  // Check the whole knife movement segment, not just its final position, so fast throws register reliably.
+  function segmentHitsFruit(x1,y1,x2,y2,fruit) {
+    const dx=x2-x1, dy=y2-y1;
+    const lengthSq=dx*dx+dy*dy || 1;
+    const t=Math.max(0,Math.min(1,((fruit.x-x1)*dx+(fruit.y-y1)*dy)/lengthSq));
+    const nearestX=x1+dx*t, nearestY=y1+dy*t;
+    return Math.hypot(fruit.x-nearestX,fruit.y-nearestY) < fruit.radius+8;
+  }
+
+  function stickKnife(knife, kind, x=knife.x, y=knife.y) {
+    // Leave a short-lived embedded knife at the impact point, including fruit hits.
+    state.lodged.push({x,y,angle:knife.angle,kind,life:kind==='fruit'?1.25:5, maxLife:kind==='fruit'?1.25:5});
+    if(state.lodged.length>36)state.lodged.shift();
   }
 
   function update(dt) {
@@ -123,12 +131,25 @@
     state.fruits=state.fruits.filter(f=>f.x>-50&&f.x<state.w+50&&f.y>-60&&f.y<state.h+70);
 
     for(const k of state.knives){
-      k.life-=dt; k.x+=k.vx*dt; k.y+=k.vy*dt;
-      k.trail.push({x:k.x,y:k.y}); if(k.trail.length>7)k.trail.shift();
-      for(const f of state.fruits){if(!f.sliced&&hitTest(k,f)){f.sliced=true;burst(f);k.hit=true;break;}}
+      k.life-=dt;k.px=k.x;k.py=k.y;k.x+=k.vx*dt;k.y+=k.vy*dt;
+      k.trail.push({x:k.x,y:k.y});if(k.trail.length>7)k.trail.shift();
+      for(const f of state.fruits){
+        if(!f.sliced&&segmentHitsFruit(k.px,k.py,k.x,k.y,f)){
+          f.sliced=true;burst(f);k.hit=true;
+          stickKnife(k,'fruit',f.x,f.y);
+          break;
+        }
+      }
+      if(!k.hit&&(k.life<=0||k.x<-20||k.x>state.w+20||k.y<-20||k.y>state.h+20)){
+        const x=Math.max(12,Math.min(state.w-12,k.x));
+        const y=Math.max(12,Math.min(state.h-12,k.y));
+        stickKnife(k,'board',x,y);k.hit=true;
+      }
     }
-    state.knives=state.knives.filter(k=>k.life>0&&!k.hit&&k.x>-40&&k.x<state.w+40&&k.y>-40&&k.y<state.h+40);
+    state.knives=state.knives.filter(k=>!k.hit);
     state.fruits=state.fruits.filter(f=>!f.sliced);
+    for(const lodged of state.lodged)lodged.life-=dt;
+    state.lodged=state.lodged.filter(k=>k.life>0);
 
     for(const p of state.particles){p.life-=dt;p.x+=p.vx*dt;p.y+=p.vy*dt;p.vx*=Math.exp(-2.2*dt);p.vy=(p.vy+250*dt)*Math.exp(-.25*dt);}
     state.particles=state.particles.filter(p=>p.life>0);
@@ -165,25 +186,25 @@
     ctx.fillStyle=grad;ctx.beginPath();ctx.ellipse(0,0,r*.91,r,0,0,TAU);ctx.fill();
     ctx.shadowBlur=0;
     ctx.strokeStyle='#ffffff44';ctx.lineWidth=1.5;ctx.beginPath();ctx.ellipse(0,0,r*.91,r,0,0,TAU);ctx.stroke();
-    // Small leaf and stem give each piece a recognizable fruit silhouette.
     ctx.strokeStyle='#66462b';ctx.lineWidth=2.3;ctx.beginPath();ctx.moveTo(0,-r*.76);ctx.quadraticCurveTo(2,-r*1.06,5,-r*1.08);ctx.stroke();
     ctx.fillStyle=f.color.leaf;ctx.beginPath();ctx.ellipse(8,-r*.91,5,2.4,-.45,0,TAU);ctx.fill();
     ctx.fillStyle='#ffffff9a';ctx.beginPath();ctx.ellipse(-r*.34,-r*.36,r*.12,r*.07,-.65,0,TAU);ctx.fill();
     ctx.restore();
   }
 
-  function drawKnife(k) {
+  function drawKnife(k, lodged=false) {
     ctx.save();
-    if(k.trail.length>1){ctx.beginPath();ctx.moveTo(k.trail[0].x,k.trail[0].y);for(const p of k.trail)ctx.lineTo(p.x,p.y);
+    if(!lodged&&k.trail?.length>1){ctx.beginPath();ctx.moveTo(k.trail[0].x,k.trail[0].y);for(const p of k.trail)ctx.lineTo(p.x,p.y);
       ctx.strokeStyle='#d8ff6966';ctx.lineWidth=3;ctx.lineCap='round';ctx.shadowColor='#d8ff69';ctx.shadowBlur=12;ctx.stroke();ctx.shadowBlur=0;}
     ctx.translate(k.x,k.y);ctx.rotate(k.angle+Math.PI/2);
-    // Blade points forward; handle trails behind it.
-    ctx.shadowColor='#d9fbff77';ctx.shadowBlur=9;
-    const blade=ctx.createLinearGradient(-5,0,5,0);blade.addColorStop(0,'#809ba4');blade.addColorStop(.45,'#f3ffff');blade.addColorStop(1,'#718e99');
-    ctx.fillStyle=blade;ctx.beginPath();ctx.moveTo(0,-20);ctx.quadraticCurveTo(7,-10,5,2);ctx.lineTo(-5,2);ctx.quadraticCurveTo(-7,-10,0,-20);ctx.fill();
-    ctx.shadowBlur=0;ctx.fillStyle='#d8ff69';ctx.fillRect(-8,1,16,3);
+    // Blade points forward; use a metallic bevel and wrapped handle for a more knife-like silhouette.
+    ctx.shadowColor='#d9fbff77';ctx.shadowBlur=lodged?4:9;
+    const blade=ctx.createLinearGradient(-5,0,5,0);blade.addColorStop(0,'#71838b');blade.addColorStop(.32,'#d7e5e5');blade.addColorStop(.48,'#ffffff');blade.addColorStop(1,'#718e99');
+    ctx.fillStyle=blade;ctx.beginPath();ctx.moveTo(0,-23);ctx.quadraticCurveTo(7,-12,5,1);ctx.lineTo(-5,1);ctx.quadraticCurveTo(-7,-12,0,-23);ctx.fill();
+    ctx.strokeStyle='#ffffffaa';ctx.lineWidth=.8;ctx.beginPath();ctx.moveTo(0,-19);ctx.lineTo(1,-1);ctx.stroke();
+    ctx.shadowBlur=0;ctx.fillStyle='#d8ff69';ctx.fillRect(-8,0,16,3);
     ctx.fillStyle='#d7e4dc';ctx.beginPath();ctx.roundRect(-3,-1,6,16,2);ctx.fill();
-    ctx.fillStyle='#71523a';ctx.beginPath();ctx.roundRect(-3,12,6,12,2);ctx.fill();
+    ctx.fillStyle='#71523a';ctx.beginPath();ctx.roundRect(-3,12,6,13,2);ctx.fill();
     ctx.strokeStyle='#d8b484';ctx.lineWidth=1;for(let i=0;i<3;i++){ctx.beginPath();ctx.moveTo(-2,14+i*3);ctx.lineTo(2,16+i*3);ctx.stroke();}
     ctx.restore();
   }
@@ -196,6 +217,8 @@
     for(const p of state.particles){ctx.globalAlpha=Math.max(0,p.life/p.max);ctx.fillStyle=p.color;ctx.shadowColor=p.color;ctx.shadowBlur=8;ctx.beginPath();ctx.arc(p.x,p.y,p.size,0,TAU);ctx.fill();}
     ctx.globalAlpha=1;ctx.shadowBlur=0;
     for(const k of state.knives)drawKnife(k);
+    for(const k of state.lodged){ctx.globalAlpha=k.kind==='fruit'?Math.min(1,k.life/.25):Math.min(1,k.life/.5);drawKnife(k,true);}
+    ctx.globalAlpha=1;
     for(const p of state.sparks){ctx.globalAlpha=p.life/p.max;ctx.strokeStyle=p.color;ctx.lineWidth=2;ctx.beginPath();ctx.arc(p.x,p.y,12+(1-p.life/p.max)*25,0,TAU);ctx.stroke();}
     ctx.globalAlpha=1;ctx.restore();
   }
@@ -214,7 +237,6 @@
   canvas.addEventListener('pointerup',e=>{
     e.preventDefault();if(!state.pointer)return;
     const p=point(e);const dx=p.x-state.pointer.x,dy=p.y-state.pointer.y;
-    // A quick swipe aims by its direction; a tap aims from the portal toward the thumb.
     if(Math.hypot(dx,dy)>20)throwKnife(state.cx+dx*2,state.cy+dy*2);else throwKnife(p.x,p.y);
     state.pointer=null;
   });
